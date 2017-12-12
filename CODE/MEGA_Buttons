@@ -1,0 +1,930 @@
+#include <Servo.h>
+#include "Arduino.h"
+#include "SoftwareSerial.h"
+#include "DFRobotDFPlayerMini.h"
+
+////////BRAIN//////////////////////////////////////
+//NEMA signal output
+int steps_X = 23;
+int direct_X = 25;
+int steps_Y = 27;
+int direct_Y = 29;
+int steps_S = 31;
+int direct_S = 33;
+int speed_S = 1200;
+//Down stepmotor output
+//pin definition
+const int motorPin1 = 46;    // 28BYJ48 In1
+const int motorPin2 = 48;    // 28BYJ48 In2
+const int motorPin3 = 50;   // 28BYJ48 In3
+const int motorPin4 = 52;   // 28BYJ48 In4                   
+//variable definition
+int motorSpeed = 1000;   // this variable sets the rotation speed of the motor
+int stepCounter = 0;     // this variable counts the number of steps made
+int stepsPerRev = 4076;  // this variable defines the amount of steps there are in a revolution
+//sequence definition
+//stepmotors can be used in three diferent ways to obtain different performances (1 fase, 2 fases or half fase).
+//We use half fase as recommended by the motor producer.
+const int numSteps = 8;
+const int stepsLookup[8] = { B1000, B1100, B0100, B0110, B0010, B0011, B0001, B1001 };
+
+//LED variables
+int RGB[] = {53, 51, 49};
+int LED;
+int heartcount = 0;
+/////ON
+int LEDon_prev;
+int LEDon_now;
+int t_on=500;
+int color_on;
+/////START
+int LEDstart_prev;
+int LEDstart_now;
+int t_start = 2000;
+int color_start;
+int state_start;
+boolean startctrl = true;
+//Colour change
+int colourchange = 0;
+int colourprev = 0;
+int colournow;
+//START variables
+boolean gamestarted=false;
+boolean onpressed=false;
+boolean startpressed=false;
+boolean timeron=false;
+int win = 47;
+int prize = 32;
+int val;
+Servo myservo;  // create servo object to control a servo
+
+//DFPlayer MP3 SOUND
+SoftwareSerial mySoftwareSerial(10, 11); // RX, TX
+DFRobotDFPlayerMini myDFPlayer;
+int mocked;
+boolean on_played = false;
+boolean start_played = false;
+int soundnow;
+int soundprev = 0;
+boolean soundctrl1 = false;
+boolean soundctrl2 = false;
+boolean bloopctrl = true;
+boolean noisectrl = true;
+boolean downctrl = false;
+boolean winctrl = true;
+
+//Rail end sensors
+int fcarr_XI = 26;
+int fcarr_YI = 28;
+int fcarr_XD = 22;
+int fcarr_YD = 24;
+
+////////BUTTONS////////////////////////////////////
+////Input
+//Move buttons
+int move_IN[] = {6,7,8,9};
+//Down buttons
+int down_IN = 5;
+//Blooper buttons
+int blooper_IN = 12;
+//Start buttons
+int start_IN = 3;
+int on_IN = 4;
+//PANIC button
+int PANIC_IN = 13;
+int PANIC_OUT = 37;
+
+////Number variables
+int BLOOP;
+int i;
+int prevmillis;
+int nowmillis;
+int paused=8000;
+boolean lastmin;
+
+////////TIMER//////////////////////////////////////
+int lastmin_IN = 41;
+int spin_change1 = 44;
+int spin_change2 = 43;
+int timeout = 45;
+int Timer_start = 39;
+int AMOKnow;
+int AMOKprev = 0;
+int AMOKtime = 1000;
+int spin_control = 0;
+
+void setup() 
+{
+
+  ///////////////////////////////////////BRAIN setup
+  //NEMAS
+  pinMode(steps_X, OUTPUT); 
+  pinMode(direct_X, OUTPUT);
+  pinMode(steps_Y, OUTPUT); 
+  pinMode(direct_Y, OUTPUT);
+  pinMode(steps_S, OUTPUT); 
+  pinMode(direct_S, OUTPUT);
+  //Stepmotor
+  pinMode(motorPin1, OUTPUT);
+  pinMode(motorPin2, OUTPUT);
+  pinMode(motorPin3, OUTPUT);
+  pinMode(motorPin4, OUTPUT); 
+  //Rail end sensors
+  pinMode(fcarr_XI, INPUT_PULLUP);
+  pinMode(fcarr_YI, INPUT_PULLUP);
+  pinMode(fcarr_XD, INPUT_PULLUP);
+  pinMode(fcarr_YD, INPUT_PULLUP);
+  //LED sequences
+  pinMode(RGB[0], OUTPUT);
+  pinMode(RGB[1], OUTPUT);
+  pinMode(RGB[2], OUTPUT);
+  //
+  digitalWrite(RGB[0],HIGH);
+  digitalWrite(RGB[1],HIGH);
+  digitalWrite(RGB[2],HIGH);
+  //Start setup
+  pinMode(on_IN, INPUT);
+  pinMode(start_IN, INPUT);
+  //Servo setup
+  pinMode(win, INPUT_PULLUP);
+  pinMode(prize, OUTPUT);
+  myservo.attach(prize);
+  //SOUND setup
+  mySoftwareSerial.begin(9600);
+  Serial.begin(115200);
+  
+  Serial.println();
+  Serial.println(F("DFRobot DFPlayer Mini Demo"));
+  Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
+  
+  if (!myDFPlayer.begin(mySoftwareSerial)) {  //Use softwareSerial to communicate with mp3.
+    Serial.println(F("Unable to begin:"));
+    Serial.println(F("1.Please recheck the connection!"));
+    Serial.println(F("2.Please insert the SD card!"));
+    //while(true);
+  }
+  Serial.println(F("DFPlayer Mini online."));
+  
+  myDFPlayer.volume(30);  //Set volume value. From 0 to 30
+
+  ///////////////////////////////////////Buttons input pins setup
+  pinMode(move_IN[0], INPUT);
+  pinMode(move_IN[1], INPUT);
+  pinMode(move_IN[2], INPUT);
+  pinMode(move_IN[3], INPUT);
+  pinMode(down_IN, INPUT);
+  pinMode(blooper_IN, INPUT);
+  pinMode(start_IN, INPUT);
+  pinMode(PANIC_IN, INPUT);
+  pinMode(PANIC_OUT, OUTPUT);
+
+  ///////////////////////////////////////Timer input pins setup
+  pinMode(Timer_start, OUTPUT);
+  pinMode(lastmin_IN, INPUT);
+  pinMode(spin_change1, INPUT);
+  pinMode(spin_change2, INPUT);
+  pinMode(timeout, INPUT);
+ 
+  //////////////////////////////////////RESET
+  Reset();
+}
+
+void loop()
+{
+  nowmillis=millis();
+  Spinchange();
+  ON();
+  START();
+  TIMER();
+  Colour_change();
+  MOVE(); 
+  AMOK(); //This is the function that puts AMOK in berserk mode in the last minute
+  if(digitalRead(lastmin_IN)==HIGH)
+  {
+    lastmin=true;
+  }
+  PANIC();
+  TIMEOUT();
+}
+
+void blooper()
+{
+  soundnow = millis();
+
+  if (BLOOP > 0 && BLOOP <= 5) //5% chances of triggering this blooper
+  {
+    Home();
+    BLOOP = 0;
+    bloopctrl = true;
+  }
+  else if (BLOOP > 5 && BLOOP <= 20) //15% chances of triggering this blooper
+  {
+    Run_forrest();
+    if (nowmillis - prevmillis >= 2000)
+    {
+      Spinchange();
+      BLOOP = 0;
+      bloopctrl = true;
+    }
+  }
+  else if (BLOOP > 20 && BLOOP <= 70) //50% chances of triggering this blooper
+  {
+    Noise();
+  }
+  else if (BLOOP > 70 && BLOOP <= 100) //30% chances of triggering this blooper
+  {
+    Pitch_black();
+    BLOOP = 0;
+    bloopctrl = true;
+  }
+  if ((digitalRead(blooper_IN) == HIGH) && (bloopctrl == true))
+  {
+    prevmillis = nowmillis;
+    BLOOP = int(random(0, 100)); //We generate a random number which will determine the blooper to be triggered
+    bloopctrl = false;
+    noisectrl = true;
+  }
+}
+
+void Home()
+{ 
+  gamestarted = false;
+  
+  while (digitalRead(fcarr_XD) == HIGH)
+  {
+    digitalWrite(direct_X, HIGH);    // Here we change the direction
+
+    digitalWrite(steps_X, HIGH);        // Here we generate a HIGH-LOW wave
+    delayMicroseconds(700);           // We delay it for 5 millis to create the pulse in STEP
+    digitalWrite(steps_X, LOW);         // A4988 makes makes a step inside the motor
+    delayMicroseconds(700);           // We delay it for 5 millis to avoid overlapping on the steps
+  }
+
+  while (digitalRead(fcarr_YI) == HIGH)
+  {
+    digitalWrite(direct_Y, LOW);    // Here we change the direction    
+
+    digitalWrite(steps_Y, HIGH);        // Here we generate a HIGH-LOW wave
+    delayMicroseconds(700);           // We delay it for 5 millis to create the pulse in STEP
+    digitalWrite(steps_Y, LOW);         // A4988 makes makes a step inside the motor
+    delayMicroseconds(700);           // We delay it for 5 millis to avoid overlapping on the steps
+  }
+  
+  gamestarted = true;
+}
+
+void Run_forrest()
+{
+  if (spin_control == 0)            // Here we change the direction of the rotary table
+  {
+    digitalWrite(direct_S, LOW);
+  }
+  else if (spin_control == 1)
+  {
+    digitalWrite(direct_S, HIGH);
+  }
+
+  digitalWrite(steps_S, HIGH);        // Here we generate a HIGH-LOW wave
+  delayMicroseconds(550);           // We delay it for 5 millis to create the pulse in STEP
+  digitalWrite(steps_S, LOW);         // A4988 makes makes a step inside the motor
+  delayMicroseconds(550);           // We delay it for 5 millis to avoid overlapping on the steps
+}
+
+void Pitch_black()
+{
+  colourchange = 6;
+  colourprev = colournow;
+}
+
+void Reset() //This function does the same as the Home() function but without letting the rest of the game start by itself.
+{ 
+  while (digitalRead(fcarr_XD) == HIGH)
+  {
+    digitalWrite(direct_X, HIGH);    // Here we change the direction
+
+    digitalWrite(steps_X, HIGH);        // Here we generate a HIGH-LOW wave
+    delayMicroseconds(700);           // We delay it for 5 millis to create the pulse in STEP
+    digitalWrite(steps_X, LOW);         // A4988 makes makes a step inside the motor
+    delayMicroseconds(700);           // We delay it for 5 millis to avoid overlapping on the steps
+  }
+
+  while (digitalRead(fcarr_YI) == HIGH)
+  {
+    digitalWrite(direct_Y, LOW);    // Here we change the direction    
+
+    digitalWrite(steps_Y, HIGH);        // Here we generate a HIGH-LOW wave
+    delayMicroseconds(700);           // We delay it for 5 millis to create the pulse in STEP
+    digitalWrite(steps_Y, LOW);         // A4988 makes makes a step inside the motor
+    delayMicroseconds(700);           // We delay it for 5 millis to avoid overlapping on the steps
+  }
+}
+
+void LED_on()
+{
+  if (t_on > 0)
+  {
+    LEDon_now = millis();
+    switch (color_on)
+    {
+      case 0:
+        white();
+        break;
+      case 1:
+        off();
+        break;
+    }
+    fluorescent();
+  }
+  else
+  {
+    white();
+    onpressed = true;
+    startpressed = true;
+  }
+}
+
+void LED_start()
+{
+  LEDstart_now = millis();
+  switch (color_start)
+  {
+    case 0:
+      red();
+      break;
+    case 1:
+      off();
+      break;
+  }
+  if (heartcount < 32)
+  {
+    heart();
+  }
+  else if (heartcount == 32)
+  {
+    onpressed = false;
+    timeron = true;
+  }
+}
+
+void Colour_change()
+{
+  colournow=millis();
+  if (gamestarted == true)
+  {
+    if (colournow - colourprev >= 10000)
+    {
+      if (colourchange == 5)
+      {
+        colourchange = 0;
+        colourprev=colournow;
+      }
+      else if (colourchange < 5)
+      {
+        colourchange = colourchange + 1;
+        colourprev=colournow;
+      }
+      else if (colourchange > 5)
+      {
+        colourchange = 0;
+        colourprev=colournow;
+      }
+    }
+    switch (colourchange)
+    {
+      case 0:
+        red();
+        break;
+      case 1:
+        yellow();
+        break;
+      case 2:
+        green();
+        break;
+      case 3:
+        cyan();
+        break;
+      case 4:
+        blue();
+        break;
+      case 5:
+        purple();
+        break;
+      case 6:
+        off();
+        break;
+    }
+  }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////COLORS///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void white()
+{
+  digitalWrite(RGB[0], LOW);
+  digitalWrite(RGB[1], LOW);
+  digitalWrite(RGB[2], LOW);
+}
+
+void red()
+{
+  digitalWrite(RGB[0], LOW);
+  digitalWrite(RGB[1], HIGH);
+  digitalWrite(RGB[2], HIGH);
+}
+
+void green()
+{
+  digitalWrite(RGB[0], HIGH);
+  digitalWrite(RGB[1], LOW);
+  digitalWrite(RGB[2], HIGH);
+}
+
+void blue()
+{
+  digitalWrite(RGB[0], HIGH);
+  digitalWrite(RGB[1], HIGH);
+  digitalWrite(RGB[2], LOW);
+}
+
+void yellow()
+{
+  digitalWrite(RGB[0], LOW);
+  digitalWrite(RGB[1], LOW);
+  digitalWrite(RGB[2], HIGH);
+}
+
+void purple()
+{
+  digitalWrite(RGB[0], LOW);
+  digitalWrite(RGB[1], HIGH);
+  digitalWrite(RGB[2], LOW);
+}
+
+void cyan()
+{
+  digitalWrite(RGB[0], HIGH);
+  digitalWrite(RGB[1], LOW);
+  digitalWrite(RGB[2], LOW);
+}
+
+void off()
+{
+  digitalWrite(RGB[0], HIGH);
+  digitalWrite(RGB[1], HIGH);
+  digitalWrite(RGB[2], HIGH);
+}
+
+void fluorescent()
+{
+  if (LEDon_now - LEDon_prev > t_on)
+  {
+    if (color_on == 1)
+    {
+      color_on = 0;
+    }
+    else if (color_on == 0)
+    {
+      color_on = 1;
+    }
+    LEDon_prev = LEDon_now;
+    blink_on();
+  }
+}
+
+void blink_on()
+{
+  if ((t_on <= 500) && (t_on > 350))
+  {
+    t_on = t_on - 35;
+  }
+  if ((t_on <= 350) && (t_on > 150))
+  {
+    t_on = t_on - 30;
+  }
+  if ((t_on <= 150) && (t_on > 0))
+  {
+    t_on = t_on - 25;
+  }
+}
+
+void heart()
+{
+  if (LEDstart_now - LEDstart_prev >= t_start)
+  {
+    if (color_start == 1)
+    {
+      color_start = 0;
+    }
+    else if (color_start == 0)
+    {
+      color_start = 1;
+    }
+    LEDstart_prev = LEDstart_now;
+    blink_start();
+  }
+}
+
+void blink_start()
+{
+  switch (state_start)
+  {
+    case 0:
+      t_start = 1700;
+      state_start = state_start + 1;
+      break;
+    case 1:
+      t_start = 100;
+      state_start = state_start + 1;
+      break;
+    case 2:
+      t_start = 100;
+      state_start = state_start + 1;
+      break;
+    case 3:
+      t_start = 100;
+      state_start = 0;
+      break;
+  }
+  heartcount = heartcount + 1;
+}
+
+void MOVE()
+{
+  if (gamestarted == true)
+  {
+    if (digitalRead(down_IN) == LOW)
+    {
+      Spin();
+      x_left(); //This controls the movement of the X axis to the left
+      x_right(); //This controls the movement of the X axis to the right
+      y_left(); //This controls the movement of the Y axis to the left
+      y_right(); //This controls the movement of the Y axis to the left
+      blooper();
+    }
+    else
+    {
+      down();
+      downctrl = true;
+    }
+  }
+}
+
+void PANIC()
+{
+  if ((digitalRead(PANIC_IN) == HIGH) && digitalRead(lastmin_IN) == HIGH)
+  {
+    WIN();
+  }
+}
+////////////////////////////////////////////////FUNCTIONS/////////////////////////////
+void Spin()
+{
+  if (spin_control == 0)            // Here we change the direction of the rotary table
+  {
+    digitalWrite(direct_S, LOW);
+  }
+  else if (spin_control == 1)
+  {
+    digitalWrite(direct_S, HIGH);
+  }
+
+  digitalWrite(steps_S, HIGH);        // Here we generate a HIGH-LOW wave
+  delayMicroseconds(speed_S);           // We delay it for 5 millis to create the pulse in STEP
+  digitalWrite(steps_S, LOW);         // A4988 makes makes a step inside the motor
+  delayMicroseconds(speed_S);           // We delay it for 5 millis to avoid overlapping on the steps
+}
+
+void Spinchange()
+{
+  if (digitalRead(spin_change1) == HIGH)
+  {
+    Serial.println("cambio 1");
+    speed_S = 800;
+  }
+  else if (digitalRead(spin_change2) == HIGH)
+  {
+    Serial.println("cambio 2");
+    speed_S = 500;
+  }
+  else if (digitalRead(lastmin_IN) == HIGH)
+  {
+    Serial.println("cambio 3");
+    speed_S = 1000;
+  }
+  //Serial.println("Saliendo de spinchange");
+}
+
+void x_left()
+{
+  //Moves the hook to the left through the X axis
+  if ((digitalRead(move_IN[0]) == HIGH) && (digitalRead(fcarr_XI) == HIGH))
+  {
+    digitalWrite(direct_X, LOW);    // Here we change the direction
+
+    digitalWrite(steps_X, HIGH);        // Here we generate a HIGH-LOW wave
+    delayMicroseconds(500);           // We delay it for 5 millis to create the pulse in STEP
+    digitalWrite(steps_X, LOW);         // A4988 makes makes a step inside the motor
+    delayMicroseconds(500);           // We delay it for 5 millis to avoid overlapping on the steps
+  }
+}
+
+void y_left()
+{
+  //Moves the hook to the left through the Y axis
+  if ((digitalRead(move_IN[1]) == HIGH) && (digitalRead(fcarr_YI) == HIGH))
+  {
+    digitalWrite(direct_Y, LOW);    // Here we change the direction
+
+    digitalWrite(steps_Y, HIGH);        // Here we generate a HIGH-LOW wave
+    delayMicroseconds(500);           // We delay it for 5 millis to create the pulse in STEP
+    digitalWrite(steps_Y, LOW);         // A4988 makes makes a step inside the motor
+    delayMicroseconds(500);           // We delay it for 5 millis to avoid overlapping on the steps
+  }
+}
+
+void x_right()
+{
+  //Moves the hook to the right through the X axis
+  if ((digitalRead(move_IN[2]) == HIGH) && (digitalRead(fcarr_XD) == HIGH))
+  {
+    digitalWrite(direct_X, HIGH);    // Here we change the direction
+
+    digitalWrite(steps_X, HIGH);        // Here we generate a HIGH-LOW wave
+    delayMicroseconds(500);           // We delay it for 5 millis to create the pulse in STEP
+    digitalWrite(steps_X, LOW);         // A4988 makes makes a step inside the motor
+    delayMicroseconds(500);           // We delay it for 5 millis to avoid overlapping on the steps
+  }
+}
+
+void y_right()
+{
+  //Moves the hook to the right through the Y axis
+  if ((digitalRead(move_IN[3]) == HIGH) && (digitalRead(fcarr_YD) == HIGH))
+  {
+    digitalWrite(direct_Y, HIGH);    // Here we change the direction
+
+    digitalWrite(steps_Y, HIGH);        // Here we generate a HIGH-LOW wave
+    delayMicroseconds(500);           // We delay it for 5 millis to create the pulse in STEP
+    digitalWrite(steps_Y, LOW);         // A4988 makes makes a step inside the motor
+    delayMicroseconds(500);           // We delay it for 5 millis to avoid overlapping on the steps
+  }
+}
+
+void down()
+{
+  while (downctrl == true)
+  {
+    for (int i = 0; i < stepsPerRev * 3; i++)
+    {
+      clockwise();
+      delayMicroseconds(motorSpeed);
+    }
+    if(digitalRead(win)==LOW)
+    {
+      WIN();
+    }
+    else
+    {
+    for (int i = 0; i < stepsPerRev * 3; i++)
+    {
+      anticlockwise();
+      delayMicroseconds(motorSpeed);
+    }
+    }
+    downctrl = false;
+  }
+}
+
+void clockwise()
+{
+  stepCounter++;
+  if (stepCounter >= numSteps) stepCounter = 0;
+  setOutput(stepCounter);
+}
+
+void anticlockwise()
+{
+  stepCounter--;
+  if (stepCounter < 0) stepCounter = numSteps - 1;
+  setOutput(stepCounter);
+}
+
+void setOutput(int step)
+{
+  digitalWrite(motorPin1, bitRead(stepsLookup[step], 0));
+  digitalWrite(motorPin2, bitRead(stepsLookup[step], 1));
+  digitalWrite(motorPin3, bitRead(stepsLookup[step], 2));
+  digitalWrite(motorPin4, bitRead(stepsLookup[step], 3));
+}
+
+void Sound_on()
+{
+  if (on_played == false)
+  {
+    soundnow = millis();
+    myDFPlayer.play(2);
+    on_played = true;
+    Serial.println("dfplayer cancion 1");
+    if (soundnow - soundprev > 40000) //We give time so that the file can be reproduced completely
+    {
+      soundprev = soundnow;
+      myDFPlayer.pause();
+    }
+  }
+}
+
+void Sound_start()
+{
+  if (start_played == false)
+  {
+    soundnow = millis();
+    myDFPlayer.play(1);
+    start_played = true;
+    Serial.println("dfplayer cancion 2");
+    if (soundnow - soundprev > 40000) //We give time so that the file can be reproduced completely
+    {
+      soundprev = soundnow;
+      myDFPlayer.pause();
+    }
+  }
+}
+
+void Sound_Timer()
+{
+  myDFPlayer.play(3);
+  myDFPlayer.loop(3);
+}
+
+void Noise()
+{
+  if (noisectrl == true)
+  {
+    mocked = (int(random(4, 13)));
+    noisectrl = false;
+    gamestarted = false;
+    myDFPlayer.play(mocked);
+  }
+  delay(3000);
+  BLOOP = 0;
+  bloopctrl = true;
+  timeron = true;
+}
+
+
+
+void printDetail(uint8_t type, int value) {
+  switch (type) {
+    case TimeOut:
+      Serial.println(F("Time Out!"));
+      break;
+    case WrongStack:
+      Serial.println(F("Stack Wrong!"));
+      break;
+    case DFPlayerCardInserted:
+      Serial.println(F("Card Inserted!"));
+      break;
+    case DFPlayerCardRemoved:
+      Serial.println(F("Card Removed!"));
+      break;
+    case DFPlayerCardOnline:
+      Serial.println(F("Card Online!"));
+      break;
+    case DFPlayerPlayFinished:
+      Serial.print(F("Number:"));
+      Serial.print(value);
+      Serial.println(F(" Play Finished!"));
+      break;
+    case DFPlayerError:
+      Serial.print(F("DFPlayerError:"));
+      switch (value) {
+        case Busy:
+          Serial.println(F("Card not found"));
+          break;
+        case Sleeping:
+          Serial.println(F("Sleeping"));
+          break;
+        case SerialWrongStack:
+          Serial.println(F("Get Wrong Stack"));
+          break;
+        case CheckSumNotMatch:
+          Serial.println(F("Check Sum Not Match"));
+          break;
+        case FileIndexOut:
+          Serial.println(F("File Index Out of Bound"));
+          break;
+        case FileMismatch:
+          Serial.println(F("Cannot Find File"));
+          break;
+        case Advertise:
+          Serial.println(F("In Advertise"));
+          break;
+        default:
+          break;
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+void ON()
+{
+  //Serial.println("entro en ON");
+  // This if works as a variable switch that reads the button in order to start the sequence.
+  if ((digitalRead(on_IN) == HIGH) && (startpressed == false))
+  {
+    Sound_on();
+    if (soundctrl1 == true)
+    {
+      delay(200);
+      soundctrl1 = false;
+    }
+    LED_on();
+  }
+}
+
+void START()
+{
+  //Serial.println("entro en START");
+  // This if works as a variable switch that reads the button in order to start the sequence.
+  if ((digitalRead(start_IN) == HIGH) && (onpressed == true))
+  {
+    Sound_start();
+    if (soundctrl2 == true)
+    {
+      delay(500);
+      soundctrl2 = false;
+    }
+    LED_start();
+  }
+}
+
+void TIMER()
+{
+  if (timeron == true)
+  {
+    digitalWrite(Timer_start, HIGH);
+    Sound_Timer();
+    delay(15);
+    gamestarted = true;
+    timeron = false;
+  }
+}
+
+void WIN()
+{
+  if (winctrl == true)
+  {
+    myDFPlayer.play(15);
+    yellow();
+    gamestarted = false;
+    digitalWrite(PANIC_OUT, HIGH);
+    digitalWrite(prize, HIGH); //mover el servo para dar premio
+    val = digitalRead(prize);           // reads the value of the potentiometer (value between 0 and 1023)
+    val = map(val, 0, 1, 0, 180);        // scale it to use it with the servo (value between 0 and 180)
+    myservo.write(val);                  // sets the servo position according to the scaled value
+    delay(15);
+    winctrl = false;
+    if (digitalRead(PANIC_IN) == LOW)
+    {
+      for (int i = 0; i < stepsPerRev * 3; i++)
+      {
+        anticlockwise();
+        delayMicroseconds(motorSpeed);
+      }
+    }
+  }
+}
+
+void AMOK()
+{
+  AMOKnow = millis();
+  if (digitalRead(lastmin_IN) == HIGH)
+  {
+    if (AMOKnow - AMOKprev >= AMOKtime)
+    {
+      AMOKprev = AMOKnow;
+      AMOKtime = (int(random(100,10000)));
+      if(spin_control == 0)
+      {
+        spin_control = 1;
+      }
+      else if(spin_control == 1)
+      {
+        spin_control = 0;
+      }
+    }
+  }
+}
+
+
+void TIMEOUT()
+{
+  if (digitalRead(timeout) == HIGH)
+  {
+    myDFPlayer.play(14);
+    off();
+    gamestarted = false;
+    delay(240000);
+    asm("jmp 0x0000");
+  }
+}
